@@ -1,6 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+from matplotlib.ticker import MaxNLocator
 import seaborn as sns
 import math
 from sklearn.metrics import roc_curve, auc
@@ -189,8 +190,8 @@ def plot_target_vs_predictors(
     # Each predictor gets 3 rows (line, bar, spacer)
     total_rows = n_rows * 3
 
-    # Example: 3 stacked rows with last row as a blank spacer
-    row_heights = [6, 3, 6] * n_rows
+    # Set height ratios for each 3-row group
+    row_heights = [7, 4, 6] * n_rows
 
     gs = gridspec.GridSpec(total_rows, n_cols, height_ratios=row_heights, hspace=0.1)
 
@@ -231,6 +232,14 @@ def plot_target_vs_predictors(
             for j, (group_val, sub_df) in enumerate(df_temp.groupby(group_col)):
                 agg = sub_df.groupby("bin").agg(avg_target=(target, "mean")).reset_index()
                 sns.lineplot(data=agg, x="bin", y="avg_target", marker="o", label=str(group_val), ax=ax_line, color=palette[j])
+                
+                # Ensure that legend has a title
+                handles, labels = ax_line.get_legend_handles_labels()
+                ax_line.legend(
+                    handles=handles,
+                    labels=labels,
+                    title=group_col,  
+                )
         else:
             agg = df_temp.groupby("bin").agg(avg_target=(target, "mean")).reset_index()
             sns.lineplot(data=agg, x="bin", y="avg_target", marker="o", ax=ax_line, color="black")
@@ -239,6 +248,11 @@ def plot_target_vs_predictors(
         ax_line.set_xlabel("")
         ax_line.set_title(f"{target} by {col}")
         ax_line.tick_params(axis='x', labelbottom=False)
+
+        # Create grid lines and pad y limits
+        ax_line.grid(True, axis='y', linestyle='--', alpha=0.6)
+        ax_line.set_ylim(ax_line.get_ylim()[0] * 0.9, ax_line.get_ylim()[1] * 1.1)  # add 10% padding on top and bottom
+        ax_line.yaxis.set_major_locator(plt.MaxNLocator(nbins=6))
 
         # Bar: count or weight
         if weight_col:
@@ -252,13 +266,14 @@ def plot_target_vs_predictors(
                     data=bar_data, x="bin", y=weight_col, hue=group_col,
                     ax=ax_bar, dodge=True, palette=palette
                 )
+                ax_bar.legend().remove()
             else:
                 bar_data = (
                     df_temp.groupby("bin")[weight_col]
                     .sum()
                     .reset_index(name="weight")
                 )
-                sns.barplot(data=bar_data, x="bin", y="weight", ax=ax_bar, color="steelblue", legend=False)
+                sns.barplot(data=bar_data, x="bin", y="weight", ax=ax_bar, color="steelblue")
         else:
             if group_col:
                 bar_data = (
@@ -268,15 +283,28 @@ def plot_target_vs_predictors(
                 )
                 sns.barplot(
                     data=bar_data, x="bin", y="count", hue=group_col,
-                    ax=ax_bar, dodge=True, legend=False, palette=palette
+                    ax=ax_bar, dodge=True, palette=palette
                 )
+                ax_bar.legend().remove()
             else:
-                bar_data = df_temp["bin"].value_counts().reindex(df_temp["bin"].unique(), fill_value=0)
-                ax_bar.bar(bar_data.index, bar_data.values, color="steelblue")
+                bar_data = (
+                    df_temp.groupby("bin")[target]
+                    .count()
+                    .reset_index(name="count")
+                )
+                sns.barplot(
+                    data=bar_data, x="bin", y="count",
+                    ax=ax_bar, dodge=True, color="steelblue"
+                )
+                ax_bar.legend().remove()
 
         ax_bar.set_xlabel("")
         ax_bar.set_xticklabels(ax_bar.get_xticklabels(), rotation=45, ha="right")
-        ax_bar.legend().remove()
+
+        # Create grid lines and pad y limits
+        ax_bar.grid(True, axis='y', linestyle='--', alpha=0.6)
+        ax_bar.set_ylim(0, ax_bar.get_ylim()[1] * 1.1)
+        ax_bar.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
 
     plt.subplots_adjust(hspace=0.15, wspace=0.3)
     plt.show()
