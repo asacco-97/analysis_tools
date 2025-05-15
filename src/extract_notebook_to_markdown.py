@@ -1,24 +1,20 @@
 import nbformat
 import os
 import base64
-from pathlib import Path
 import sys
 
-def extract_notebook_to_markdown_with_images(notebook_path, output_md_path=None):
+def extract_notebook_to_markdown_inline_images(notebook_path, output_md_path=None):
     """
-        Converts a Jupyter notebook to a Markdown file and exports images to a folder. 
-        - Usage: python extract_notebook_to_markdown_with_images.py <notebook path.ipynb> <output path.md>
+    Converts a Jupyter notebook to a Markdown file and embeds images as base64 data URIs.
+    Usage: python extract_notebook_to_markdown_inline_images.py <notebook path.ipynb> [output path.md]
     """
     with open(notebook_path, 'r', encoding='utf-8') as f:
         nb = nbformat.read(f, as_version=4)
 
     base_name = os.path.splitext(os.path.basename(notebook_path))[0]
     output_dir = os.path.dirname(output_md_path) if output_md_path else os.getcwd()
-    image_dir = os.path.join(output_dir, f"{base_name}_images")
-    Path(image_dir).mkdir(parents=True, exist_ok=True)
 
     output_lines = []
-    image_count = 1
 
     for cell_index, cell in enumerate(nb.cells):
         if cell.cell_type == 'markdown':
@@ -47,16 +43,9 @@ def extract_notebook_to_markdown_with_images(notebook_path, output_md_path=None)
                 elif output.output_type == 'display_data':
                     if 'image/png' in output.get('data', {}):
                         img_data = output['data']['image/png']
-                        img_bytes = base64.b64decode(img_data)
-                        img_filename = f"output_{image_count}.png"
-                        img_path = os.path.join(image_dir, img_filename)
-                        with open(img_path, 'wb') as img_file:
-                            img_file.write(img_bytes)
-
-                        # Insert image in Markdown
-                        relative_path = os.path.relpath(img_path, output_dir).replace('\\', '/')
-                        output_lines.append(f"![output_{image_count}]({relative_path})")
-                        image_count += 1
+                        # Embed as base64 image
+                        data_uri = f"data:image/png;base64,{img_data}"
+                        output_lines.append(f"![image](data:image/png;base64,{img_data})")
 
                 elif output.output_type == 'error':
                     output_lines.append("**Error:**")
@@ -72,13 +61,12 @@ def extract_notebook_to_markdown_with_images(notebook_path, output_md_path=None)
     with open(output_md_path, 'w', encoding='utf-8') as f:
         f.write("\n".join(output_lines))
 
-    print(f"Markdown exported to {output_md_path}")
-    print(f"Images saved to {image_dir}")
+    print(f"Markdown with inline images exported to {output_md_path}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python export_with_images.py notebook.ipynb [output.md]")
+        print("Usage: python export_with_inline_images.py notebook.ipynb [output.md]")
     else:
         notebook_path = sys.argv[1]
         output_md_path = sys.argv[2] if len(sys.argv) > 2 else None
-        extract_notebook_to_markdown_with_images(notebook_path, output_md_path)
+        extract_notebook_to_markdown_inline_images(notebook_path, output_md_path)
