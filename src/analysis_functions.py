@@ -1,5 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+from matplotlib.ticker import MaxNLocator
 import seaborn as sns
 import math
 from sklearn.metrics import roc_curve, auc
@@ -174,75 +176,136 @@ def plot_error_by_group(df, target_col, pred_col, group_col, bins=10):
     plt.show()
 
 
-def plot_target_vs_predictors(df, target, predictors):
-    """Plot the average of the target vs. levels of predictor variables. If predictor is numeric, create bins."""
+def plot_target_vs_predictors(
+    df, target, predictors, bins: int = 10,
+    weight_col: str = None, group_col: str = None
+):
+    """
+    Plot target averages segmented by group_col, with count/weight bars at bottom.
+    """
     n_preds = len(predictors)
     n_cols = 2 if n_preds <= 4 else 3
     n_rows = math.ceil(n_preds / n_cols)
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 4.5 * n_rows))
-    axes = axes.flatten()
+    # Each predictor gets 3 rows (line, bar, spacer)
+    total_rows = n_rows * 3
+
+    # Set height ratios for each 3-row group
+    row_heights = [7, 4, 6] * n_rows
+
+    gs = gridspec.GridSpec(total_rows, n_cols, height_ratios=row_heights, hspace=0.1)
+
+    fig = plt.figure(figsize=(6 * n_cols, 5 * n_rows))
+
+    palette = sns.color_palette("tab10")
 
     for i, col in enumerate(predictors):
-        ax = axes[i]
+        block = i // n_cols
+        row = block * 3
+        col_pos = i % n_cols
+
+        ax_line = fig.add_subplot(gs[row, col_pos])
+        ax_bar = fig.add_subplot(gs[row + 1, col_pos], sharex=ax_line)
+
+        df_temp = df[[col, target]].copy()
+        if weight_col:
+            df_temp[weight_col] = df[weight_col]
+        if group_col:
+            df_temp[group_col] = df[group_col]
+
+        df_temp = df_temp.dropna()
+
+        # Binning numeric features
         unique_vals = df[col].nunique()
-        df_temp = df[[col, target]].dropna().copy()
-
-        # If a column is numeric with > 30 levels
         if pd.api.types.is_numeric_dtype(df[col]) and unique_vals > 30:
-            df_temp["bin"] = pd.qcut(df_temp[col], 20, duplicates='drop')
-            df_grouped = df_temp.groupby("bin")[target].mean().reset_index()
-            df_grouped["bin"] = df_grouped["bin"].astype(str)
-            sns.lineplot(data=df_grouped, x="bin", y=target, marker='o', ax=ax)
-            ax.set_xticklabels(ax.get_xticklabels(), rotation=45)
+            df_temp["bin"] = pd.qcut(df_temp[col], bins, duplicates="drop")
         else:
-            # Categorical or low-cardinality numeric
-            df_temp[col] = df_temp[col].astype(str)
-            if unique_vals > 10:
-                top_vals = df_temp[col].value_counts().nlargest(10).index
-                df_temp[col] = df_temp[col].apply(lambda x: x if x in top_vals else "Other")
-            df_grouped = df_temp.groupby(col)[target].mean().reset_index()
-            sns.barplot(data=df_grouped, x=col, y=target, ax=ax, color='tab:orange')
-            ax.set_xticklabels(ax.get_xticklabels(), rotation=45)
+            df_temp["bin"] = df_temp[col].astype(str)
+            if unique_vals > bins:
+                top_vals = df_temp["bin"].value_counts().nlargest(bins).index
+                df_temp["bin"] = df_temp["bin"].apply(lambda x: x if x in top_vals else "Other")
 
-        ax.set_title(f"{target} by {col}")
-        ax.set_ylabel("Average Value of Target")
+        df_temp["bin"] = df_temp["bin"].astype(str)
 
-    # Hide unused subplots
-    for j in range(i + 1, len(axes)):
-        fig.delaxes(axes[j])
+        # Line: target average by group
+        if group_col:
+            for j, (group_val, sub_df) in enumerate(df_temp.groupby(group_col)):
+                agg = sub_df.groupby("bin").agg(avg_target=(target, "mean")).reset_index()
+                sns.lineplot(data=agg, x="bin", y="avg_target", marker="o", label=str(group_val), ax=ax_line, color=palette[j])
+                
+                # Ensure that legend has a title
+                handles, labels = ax_line.get_legend_handles_labels()
+                ax_line.legend(
+                    handles=handles,
+                    labels=labels,
+                    title=group_col,  
+                )
+        else:
+            agg = df_temp.groupby("bin").agg(avg_target=(target, "mean")).reset_index()
+            sns.lineplot(data=agg, x="bin", y="avg_target", marker="o", ax=ax_line, color="black")
 
-    plt.tight_layout()
+        ax_line.set_ylabel(f"Average {target}")
+        ax_line.set_xlabel("")
+        ax_line.set_title(f"{target} by {col}")
+        ax_line.tick_params(axis='x', labelbottom=False)
+
+        # Create grid lines and pad y limits
+        ax_line.grid(True, axis='y', linestyle='--', alpha=0.6)
+        ax_line.set_ylim(ax_line.get_ylim()[0] * 0.9, ax_line.get_ylim()[1] * 1.1)  # add 10% padding on top and bottom
+        ax_line.yaxis.set_major_locator(plt.MaxNLocator(nbins=6))
+
+        # Bar: count or weight
+        if weight_col:
+            if group_col:
+                bar_data = (
+                    df_temp.groupby(["bin", group_col])[weight_col]
+                    .sum()
+                    .reset_index()
+                )
+                sns.barplot(
+                    data=bar_data, x="bin", y=weight_col, hue=group_col,
+                    ax=ax_bar, dodge=True, palette=palette
+                )
+                ax_bar.legend().remove()
+            else:
+                bar_data = (
+                    df_temp.groupby("bin")[weight_col]
+                    .sum()
+                    .reset_index(name="weight")
+                )
+                sns.barplot(data=bar_data, x="bin", y="weight", ax=ax_bar, color="steelblue")
+        else:
+            if group_col:
+                bar_data = (
+                    df_temp.groupby(["bin", group_col])[target]
+                    .count()
+                    .reset_index(name="count")
+                )
+                sns.barplot(
+                    data=bar_data, x="bin", y="count", hue=group_col,
+                    ax=ax_bar, dodge=True, palette=palette
+                )
+                ax_bar.legend().remove()
+            else:
+                bar_data = (
+                    df_temp.groupby("bin")[target]
+                    .count()
+                    .reset_index(name="count")
+                )
+                sns.barplot(
+                    data=bar_data, x="bin", y="count",
+                    ax=ax_bar, dodge=True, color="steelblue"
+                )
+                ax_bar.legend().remove()
+
+        ax_bar.set_xlabel("")
+        ax_bar.set_xticklabels(ax_bar.get_xticklabels(), rotation=45, ha="right")
+
+        # Create grid lines and pad y limits
+        ax_bar.grid(True, axis='y', linestyle='--', alpha=0.6)
+        ax_bar.set_ylim(0, ax_bar.get_ylim()[1] * 1.1)
+        ax_bar.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
+
+    plt.subplots_adjust(hspace=0.15, wspace=0.3)
     plt.show()
 
-    
-def plot_variable_distributions(df, variables, bins=30):
-    """Create distribution plots for a list of numeric and/or categorical variables."""
-    n_vars = len(variables)
-    n_cols = 2 if n_vars <= 4 else 3
-    n_rows = math.ceil(n_vars / n_cols)
-
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 4.5 * n_rows))
-    axes = axes.flatten()
-
-    for i, col in enumerate(variables):
-        ax = axes[i]
-        if (pd.api.types.is_numeric_dtype(df[col])) & (df[col].nunique() > 10):
-            sns.histplot(df[col].dropna(), bins=bins, kde=True, ax=ax, color='tab:blue')
-            ax.set_title(f"Distribution of {col}")
-            ax.set_xlabel(col)
-            ax.set_ylabel("Count")
-        else:
-            val_counts = df[col].value_counts().head(20)
-            sns.barplot(x=val_counts.index.astype(str), y=val_counts.values, ax=ax, color='tab:orange')
-            ax.set_title(f"Distribution of {col}")
-            ax.set_xlabel(col)
-            ax.set_ylabel("Count")
-            ax.tick_params(axis='x', rotation=45)
-
-    # Hide any unused subplots
-    for j in range(i + 1, len(axes)):
-        fig.delaxes(axes[j])
-
-    plt.tight_layout()
-    plt.show()
