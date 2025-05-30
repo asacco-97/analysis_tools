@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.ticker import MaxNLocator
@@ -109,29 +110,24 @@ def plot_auc_curves(
 
     return auc_scores
     
-def plot_error_by_group(df, target_col, pred_col, group_col, bins=10):
+def plot_error_by_group(df, target_col, pred_col, group_col, bins=10, ax=None):
     """
-    Plot prediction mean, target mean, and count by a grouping variable.
-    Automatically bins numeric group columns and sorts by bin mean.
+    Plot prediction mean, target mean, and count by a grouping variable on a given axis.
     """
     data = df.copy()
 
-    # Bin numeric group variable and create labels based on bin mean
+    # Bin numeric group variable
     if pd.api.types.is_numeric_dtype(data[group_col]):
         binning = pd.qcut(data[group_col], q=bins, duplicates='drop')
         data["bin"] = binning
-
-        # Get mean of numeric variable per bin for label
         bin_means = data.groupby("bin")[group_col].mean()
         label_map = {interval: f"{mean:.2f}" for interval, mean in bin_means.items()}
         data["bin_label"] = data["bin"].map(label_map)
-
-        # Use numeric sort order of bin means
         ordered_labels = [label_map[b] for b in bin_means.index]
         group_col_final = "bin_label"
     else:
         group_col_final = group_col
-        ordered_labels = sorted(data[group_col].unique())
+        ordered_labels = sorted(data[group_col].dropna().unique())
 
     # Group by label
     data.rename(columns={group_col_final: group_col + " Bin"}, inplace=True)
@@ -143,8 +139,10 @@ def plot_error_by_group(df, target_col, pred_col, group_col, bins=10):
         count=(target_col, 'count')
     ).reindex(ordered_labels).reset_index()
 
-    # Plot
-    fig, ax1 = plt.subplots(figsize=(9, 4))
+    # Use provided axis or fallback to new figure
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(9, 4))
+    ax1 = ax
 
     # Bar plot for count (primary y-axis)
     sns.barplot(
@@ -164,17 +162,29 @@ def plot_error_by_group(df, target_col, pred_col, group_col, bins=10):
         data=grouped, x=group_col_final, y='actual_mean',
         ax=ax2, marker='s', label='Actual Mean'
     )
-
     ax2.set_ylabel('Predicted vs. Actual Mean', color='black')
-    ax2.set_xlabel(f'Avg. Binned Value or Level for {group_col}', color='black')
-    ax2.tick_params(axis='y', labelcolor='black')
-
-    plt.title(f'Prediction Error and Count by {group_col}')
+    ax2.set_xlabel(f'{group_col}', color='black')
     ax1.set_xticklabels(ax1.get_xticklabels(), rotation=45, ha='right')
-    plt.legend(loc='upper left')
+    ax1.set_title(f'Error by {group_col}')
+
+def plot_error_by_group_grid(df, target_col, pred_col, group_cols, bins=10, ncols=2, figsize=(6, 4)):
+    """
+    Plot prediction error and count by multiple group columns using shared grid layout.
+    Calls `plot_error_by_group` for each plot.
+    """
+    n_rows = -(-len(group_cols) // ncols)  # ceiling division
+    fig, axes = plt.subplots(n_rows, ncols, figsize=(figsize[0]*ncols, figsize[1]*n_rows))
+    axes = np.array(axes).reshape(-1)  # flatten even if 1D
+
+    for i, group_col in enumerate(group_cols):
+        plot_error_by_group(df, target_col, pred_col, group_col, bins=bins, ax=axes[i])
+
+    # Hide any extra axes
+    for j in range(len(group_cols), len(axes)):
+        fig.delaxes(axes[j])
+
     plt.tight_layout()
     plt.show()
-
 
 def plot_target_vs_predictors(
     df, target, predictors, bins: int = 10,
